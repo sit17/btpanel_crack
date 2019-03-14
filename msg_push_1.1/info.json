@@ -1,0 +1,16 @@
+{
+	"id":9999,
+	"title":"宝塔消息推送",
+	"tip":"lib",
+	"name":"msg_push",
+	"type":"扩展",
+	"ps":"宝塔消息推送，可对服务器、站点状态进行监控推送",
+	"versions":"1.1",
+	"shell":"msg_push.sh",
+	"checks":"/www/server/panel/plugin/msg_push",
+	"author":"宝塔",
+	"home":"http://www.bt.cn/bbs",
+	"date":"2018-11-14",
+	"default":false,
+	"display":0
+}
