@@ -710,7 +710,7 @@ class btwaf_main :
                     if OOOOO0OOO0O000OO0 ['endtime']>=0 :
                         if not 'btwaf'in session :session ['btwaf']=2 ;
                         return 2 
-            return 1 
+            return  
         except :
             if not 'btwaf'in session :session ['btwaf']=1 ;
             return 1 
