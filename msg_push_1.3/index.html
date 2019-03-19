@@ -1,0 +1,660 @@
+<style>
+	.alarmcon {
+		float: left;
+		width: 100%;
+	}
+
+	.bt-legend {
+		border-color: #ccc;
+		font-size: 14px;
+		padding-bottom: 6px;
+		margin-bottom: 10px;
+	}
+
+	.bt-legend .btswitch+.btswitch-btn {
+		width: 2.4em;
+		height: 1.4em;
+		margin-bottom: 0;
+	}
+
+	.bt-box {
+		display: none;
+	}
+
+	.logs_body .ov {
+		width: 475px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.cpu_block,
+	.mem_block,
+	.disk_block,
+	.net_block,
+	.url_block,
+	.mysql_block,
+	.site_block,
+	.site_adv_block {
+		display: none;
+	}
+
+	.line_nest {
+		width: 250px;
+		display: inline-block;
+	}
+
+	.line_nest .nest_name {
+		width: 75px;
+	}
+
+	.line_nest .nest_info {
+		margin-left: 75px
+	}
+</style>
+<div class="bt-form">
+	<div class="bt-w-main">
+		<div class="bt-w-menu">
+			<p class="bgw">监控推送</p>
+			<p>邮箱管理</p>
+			<p>日志</p>
+		</div>
+		<div class="bt-w-con pd15">
+			<div class="bt-box push_body" style="display:block;">
+				<div class="push_conter" style="overflow: hidden;">
+					<button class="btn btn-success btn-sm add_push_btn">添加监控推送</button>
+					<div class="ssh-item" style="margin-right:0;margin-left:0; float:right;">
+						<span style="display: inline-block;height: 20px;line-height: 20px;vertical-align: top;">服务状态&nbsp;&nbsp;</span>
+						<div class="" style="display:inline-block;"><input class="btswitch btswitch-ios" id="terclose" type="checkbox" /><label class="btswitch-btn" for="terclose"></label></div>
+					</div>
+				</div>
+				<div class="divtable relative" style="margin-top:5px;height: 420px;">
+					<table class="table table-hover" width="100%" cellspacing="0" cellpadding="0" border="0">
+						<thead>
+							<tr>
+								<th>名称</th>
+								<th> 推送方式</th>
+								<th>监控详情</th>
+								<th>是否检查</th>
+								<th style="text-align:right;"> 操作</th>
+							</tr>
+						</thead>
+						<tbody></tbody>
+					</table>
+				</div>
+				<ul class="help-info-text c7">
+					<li>监测时间单位内的平均值大于预警阈值才发送邮件通知</li>
+				</ul>
+			</div>
+			<div class="bt-box mail_body">
+				<button class="btn btn-success btn-sm add_mail_btn">添加邮箱</button><i style="color:red;font-style:normal;margin-left:10px;">*
+					必须将msg@bt.cn白名单才能收到信息<a href="https://www.bt.cn/bbs/forum.php?mod=viewthread&tid=23574&page=1&extra=#pid84228" class="btlink" style="margin-left:10px;" target="_blank" >如何设置邮箱白名单</a></i>
+				<div class="divtable mt10 relative">
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="table table-hover">
+						<thead>
+							<tr>
+								<th>邮箱地址</th>
+								<th style="width:150px;text-align: right;">操作</th>
+							</tr>
+						</thead>
+						<tbody></tbody>
+					</table>
+				</div>
+			</div>
+			<div class="bt-box logs_body">
+				<div class="divtable">
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="table table-hover">
+						<thead>
+							<tr>
+								<th>详情</th>
+								<th>操作时间</th>
+							</tr>
+						</thead>
+						<tbody></tbody>
+					</table>
+				</div>
+				<div class="page" style="margin-top:10px"></div>
+			</div>
+		</div>
+	</div>
+</div>
+<script>
+	var msg_push = {
+		push_list: [],
+		push_form: {
+			push_name: '',
+			net_bandwidth: '20',
+			net_check_time: '5',
+			net_alarm_value: '80',
+			mem_alarm_value: '80',
+			mem_check_time: '5',
+			cpu_alarm_value: '80',
+			cpu_check_time: '5',
+			disk_alarm_value: '80',
+			site_check_url: '',
+			site_check_word: '',
+			mysql: '1',
+			open: 1,
+			push_type: 'mail',
+			check_type: 'cpu'
+		},
+		bind: function () {
+			var _this = this;
+			$('.layui-layer-page').width(800);
+			_this.get_event_list();
+			_this.check_mail_first();
+			$('.bt-w-menu p').click(function (e) {
+				var index = $(this).index();
+				$(this).addClass('bgw').siblings().removeClass('bgw');
+				$(this).parent().next().find('.bt-box').eq(index).show().siblings().hide();
+				switch (index) {
+					case 0:
+						_this.get_event_list();
+						break;
+					case 1:
+						_this.get_mail_list();
+						break;
+					case 2:
+						_this.get_push_log();
+						break;
+				}
+			});
+			$('.add_push_btn').click(function (e) {
+				_this.push_event_view();
+			});
+
+			$('#terclose').change(function (e) {
+				var checked = $(this).prop('checked');
+				var confirm = layer.confirm('是否' + (!checked ? '关闭' : '开启') + '，异常监控推送服务 ', {
+					title: '警告',
+					btn: ['确定', '取消'],
+					icon: 0,
+					closeBtn: 2,
+					cancel: function (index, layero) {
+						$('#terclose').prop('checked', !checked);
+						layer.close(index);
+					},
+					yes: function (index, layero) {
+						_this.push_request(!checked ? 'stop' : 'start', {}, function (res) {
+							if (!res.status) $('#terclose').prop('checked', checked);
+						});
+					},
+					btn2: function (index, layero) {
+						$('#terclose').prop('checked', !checked);
+						layer.close(index);
+					}
+				});
+			});
+			$('.add_mail_btn').click(function (e) {
+				_this.mail_event_view();
+			});
+			_this.get_check_server(function (res) {
+				console.log(res);
+				$('#terclose').prop('checked', res.status);
+			});
+		},
+		check_mail_first: function () {
+			var load = layer.load();
+			$.get('/plugin?action=a&name=msg_push&s=CheckMailFirst', function (res) {
+				layer.close(load);
+				if (res != 0) layer.msg('请设置监控推送的邮箱地址！', { icon: 0 });
+				console.log(res);
+			});
+		},
+		// 获取事件推送列表
+		get_event_list: function () {
+			var _this = this;
+			// var  load = layer.msg('正在获取推送列表，请稍后...',{icon:16,time:0,shade: [0.3, '#000'],zIndex:999});
+			var load = layer.load();
+			$.get('/plugin?action=a&name=msg_push&s=get_msgpush_list', function (res) {
+				_this.push_list = res;
+				layer.close(load);
+				var content = '';
+				for (var i = res.length - 1; i >= 0; i--) {
+					var request_event_filter = _this.request_event_filter(res[i]);
+					content += '<tr>' +
+						'<td>' + res[i].push_name + '</td>' +
+						'<td>' + _this.filter_push_type(res[i].push_type) + '</td>' +
+						'<td><span style="width:300px;display: inline-block;overflow: hidden;text-overflow: ellipsis;white-space: nowrap;" title="' + request_event_filter.conter_title + '">' + request_event_filter.conter + '</span></td>' +
+						'<td>' + (res[i].open == 1 ? '<a href="javascript:;" class="set_push_open" style="color:#5CB85C;" data-index="' + i + '">运行中 <span style="color:#5CB85C" class="glyphicon glyphicon-play"></span></a>' : '<a href="javascript:;" class="set_push_open" style="color:red" data-index="' + i + '">已停止 <span style="color:red" class="glyphicon glyphicon-pause"></span></span>') + '</td>' +
+						'<td style="text-align:right"><a href="javascript:;" class="btlink edit_push" data-index="' + i + '">编辑</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="javascript:;" class="btlink del_push" data-name="' + res[i].push_name + '">删除</a></td>' +
+						'</tr>'
+				}
+				if (res.length == 0) {
+					conter = '<tr ><td colspan="4">当前没有数据</td></tr>'
+				}
+				$('.push_body tbody').html(content);
+				setTimeout(function () {
+					$('.del_push').click('click', function (e) {
+						var name = $(this).attr('data-name');
+						var confirm = layer.confirm('是否删除该监控&nbsp;[ ' + name + ' ]&nbsp;？ ', { title: '警告', btn: ['确定', '取消'], icon: 0, closeBtn: 2 }, function () {
+							_this.push_request('del', { push_name: name }, confirm);
+						}, function () {
+							layer.close(confirm);
+						});
+					});
+					$('.edit_push').click(function (e) {
+						var index = $(this).attr('data-index');
+						_this.push_event_view(_this.push_list[index]);
+					});
+					$('.set_push_open').click(function (e) {
+						var index = $(this).attr('data-index');
+						var confirm = layer.confirm('是否' + (_this.push_list[index].open == 0 ? '开启' : '关闭') + '消息通知&nbsp;[' + (_this.push_list[index].push_name) + ']&nbsp;？', { title: '提示', btn: ['确定', '取消'], icon: 0, closeBtn: 2 }, function () {
+							delete _this.push_list[index].time;
+							console.log(!_this.push_list[index].open ? 1 : 0)
+							_this.push_list[index].open = _this.push_list[index].open == 0 ? 1 : 0
+							_this.push_request('open', _this.push_list[index], confirm);
+						}, function () {
+							layer.close(confirm);
+						});
+					});
+				}, 100);
+			});
+		},
+		// 过滤器
+		request_event_filter: function (res) {
+			var conter = '', conter_title = '';
+			switch (res.check_type) {
+				case 'cpu':
+					conter = '每隔<a href="javascript:;" class="btlink">' + res.cpu_check_time + '分钟</a>检查一次当前的CPU使用率是否超过<a href="javascript:;" class="btlink">' + res.cpu_alarm_value + '%</a>';
+					conter_title = '每隔' + res.cpu_check_time + '分钟,检查一次当前的CPU使用率是否超过' + res.cpu_alarm_value + '%';
+					break;
+				case 'mem':
+					conter = '每隔<a href="javascript:;" class="btlink">' + res.mem_check_time + '分钟</a>检查一次当前设置的内存使用率是否超过<a href="javascript:;" class="btlink">' + res.mem_alarm_value + '%</a>';
+					conter_title = '每隔' + res.mem_check_time + '分钟,检查一次当前设置的内存使用率是否超过' + res.mem_alarm_value + '%';
+					break;
+				case 'disk':
+					conter = '检查当前设置的硬盘使用率是否超过<a href="javascript:;" class="btlink">' + res.disk_alarm_value + '%';
+					conter_title = '检查当前设置的硬盘使用率是否超过' + res.disk_alarm_value + '%';
+					break;
+				case 'net':
+					conter = '每隔<a href="javascript:;" class="btlink">' + res.net_check_time + '分钟</a>检查一次当前设置的带宽使用率是否超过<a href="javascript:;" class="btlink">' + res.net_alarm_value + '%</a>';
+					conter_title = '每隔' + res.net_check_time + '分钟,检查一次当前设置的带宽使用率是否超过' + res.net_alarm_value + '%';
+					break;
+				case 'url':
+					conter = '检查url<a href="' + res.site_check_url + '" class="btlink">' + res.site_check_url + '</a>是否出现关键字/词[<a href="javascript:;" class="btlink">' + res.site_check_word + '</a>]，出现表示正常';
+					conter_title = '检查URL ' + res.site_check_url + '是否出现关键字/词[' + res.site_check_word + '],出现表示正常';
+					break;
+				case 'site':
+					conter = '检查站点<a href="' + res.site_name + '" class="btlink">' + res.site_name + '</a>是否正常。';
+					conter_title = '检查站点' + res.site_name + '是否正常。';
+					break;
+				case 'mysql':
+					conter = '检查Slave_IO_Running，Slave_SQL_Running状态是否正常';
+					conter_title = '检查Slave_IO_Running，Slave_SQL_Running状态是否正常';
+					break;
+			}
+			return { conter: conter, conter_title: conter_title };
+		},
+		// 推送事件视图,添加或编辑
+		push_event_view: function (obj) {
+			var push_type = 0, _this = this, _option = '', _option1 = '', _option2 = '', site_list = {};
+			if (obj == undefined) {
+				obj = objDeepCopy(this.push_form)
+				push_type = 0;
+			} else {
+				push_type = 1;
+			}
+			var cpu_block = mem_block = disk_block = net_block = url_block = mysql_block = 'display:none', arry = [{ name: 'CPU', value: 'cpu' }, { name: '内存', value: 'mem' }, { name: '硬盘', value: 'disk' }, { name: '带宽', value: 'net' }, { name: '站点', value: 'site' }, { name: 'URL链接', value: 'url' }, { name: 'Mysql主从', value: 'mysql' }]
+			for (var i = 0; i < arry.length; i++) {
+				_option += '<option value="' + arry[i].value + '" ' + (obj.check_type == arry[i].value ? 'selected="selected"' : '') + '>' + arry[i].name + '</option>'
+			}
+			this.get_local_site_list(function (res) {
+				site_list = res;
+				_option1 = _this.get_site_domain(res,obj.site_name,true);
+				var push_view = layer.open({
+					type: 1,
+					closeBtn: 2,
+					title: push_type == 0 ? '添加监控推送' : '编辑监控推送[&nbsp;' + obj.push_name + '&nbsp;]',
+					area: '650px',
+					shadeClose: false,
+					content: '<div class="bt-form bt-form pd20 pb70" style="padding-left:45px">' +
+						'<div class="line">' +
+						'<span class="tname">名称</span>' +
+						'<div class="info-r"><input name="push_name" class="bt-input-text mr5" placeholder="监控推送名称" type="text" value="' + obj.push_name + '" style="width:300px;" ' + (push_type == 1 ? 'disabled="disabled"' : '') + '></div>' +
+						'</div>' +
+						'<div class="line">' +
+						'<span class="tname">推送方式</span>' +
+						'<div class="info-r"><select class="bt-input-text mr5" name="push_type" style="width:27%" ' + (push_type == 1 ? 'disabled="disabled"' : '') + '><option value="mail">邮箱</option></select><i style="color:red;font-style:normal;">*目前仅支持邮箱推送。</i></div>' +
+						'</div>' +
+						'<div class="line">' +
+						'<span class="tname">监控类型</span>' +
+						'<div class="info-r">' +
+						'<select class="bt-input-text mr5" name="check_type" style="width:27%" ' + (push_type == 1 ? 'disabled="disabled"' : '') + '>' + _option + '</select><i style="color:red;font-style:normal;">*监控类型包括:CPU、内存、硬盘、带宽、URL链接、Mysql主从</i></div>' +
+						'</div>' +
+						'<div class="line">' +
+						'<span class="tname">推送间隔时间</span>' +
+						'<div class="info-r">' +
+                        '<input name="push_time" class="bt-input-text mr5" placeholder="推送间隔时间" type="text" type="number" min="10"   value="' + (obj.push_time || '10') + '" style="width:27%" >分钟'+
+						'</div></div>' +
+						'<div class="translate_block"><div class="line cpu_block">' +
+						'<span class="tname">CPU预警阀值</span>' +
+						'<div class="info-r">' +
+						'<input name="cpu_alarm_value" class="bt-input-text mr5" type="number" min="0"  max="100" value="' + obj.cpu_alarm_value + '" style="width:50px;" />%' +
+						'<span class="tnames" style="margin-left:25px;padding-right: 20px;">CPU监测时间</span>' +
+						'<input name="cpu_check_time" class="bt-input-text mr5" type="number" min="0"  max="100" value="' + obj.cpu_check_time + '" style="width:50px;" />分钟' +
+						'</div>' +
+						'</div>' +
+						'<div class="line mem_block" >' +
+						'<span class="tname">内存预警阀值</span>' +
+						'<div class="info-r">' +
+						'<input name="mem_alarm_value" class="bt-input-text mr5" type="number" min="0"  max="100"  value="' + obj.mem_alarm_value + '" style="width:50px;" />%' +
+						'<span class="tnames" style="margin-left:25px;padding-right: 20px;">内存监测时间</span>' +
+						'<input name="mem_check_time" class="bt-input-text mr5" min= 0"  type="number" value="' + obj.mem_check_time + '" style="width:50px;" />分钟' +
+						'</div>' +
+						'</div>' +
+						'<div class="line disk_block" >' +
+						'<span class="tname">硬盘预警阀值</span>' +
+						'<div class="info-r"><input name="disk_alarm_value" class="bt-input-text mr5"  type="number" min="0"  max="100"  value="' + obj.disk_alarm_value + '" style="width:50px;" />%</div>' +
+						'</div>' +
+						'<div class="line net_block">' +
+						'<span class="tname">带宽预警阀值</span>' +
+						'<div class="info-r">' +
+						'<input class="bt-input-text mr5" type="number" name="net_alarm_value" min="0"  max="100"  value="' + obj.net_alarm_value + '" style="width:50px;" />%' +
+						'<span class="tnames" style="margin-left:25px;padding-right: 20px;">带宽监测时间</span>' +
+						'<input name="net_check_time" class="bt-input-text mr5" type="number" min= 0" value="' + obj.net_check_time + '" style="width:50px;" />分钟' +
+						'<span class="tnames" style="margin-left:25px;padding-right: 20px;">带宽总大小</span>' +
+						'<input name="net_bandwidth" class="bt-input-text mr5" type="number" min="0" value="' + obj.net_bandwidth + '" style="width:50px;" />Mbps' +
+						'</div>' +
+						'</div>' +
+                        '<div class="line net_block">' +
+                            '<span class="tname">监控网卡</span>' +
+                            '<div class="info-r"><select class="bt-input-text mr5 net_card" name="netcard" style="width:27%"></select></div>' +
+                        '</div>' +
+						'<div class="line site_block">' +
+                            '<div class="line_nest">' +
+                                '<span class="tname">站点</span>' +
+                                '<div class="info-r"><select class="bt-input-text mr5" name="site_type" style="width:150px">' + _option1 + '</select></div>' +
+                            '</div>'+
+                            '<div class="line_nest">' +
+                                '<span class="tname nest_name">域名</span>' +
+                                '<div class="info-r nest_info"><select class="bt-input-text mr5" name="domain_type" style="width:150px"></select></div>' +
+                            '</div>' +
+						'</div>' +
+						'<div class="line site_block">' +
+						'<span class="tname">精确监控</span>' +
+						'<div class="info-r"><div style="display:inline-block;"><input class="btswitch btswitch-ios" id="site_adv" name="site_adv" '+ (obj.adv == '1'?'checked="checked"':'') +' type="checkbox" ><label class="btswitch-btn" for="site_adv" style="position: relative;top: 6px;"></label></div></div>' +
+						'</div>' +
+						'<div class="line site_adv_block" style="'+ (obj.adv == '1'?'display:block':'') +'">' +
+						'<span class="tname">关键字/词</span>' +
+						'<div class="info-r"><input name="site_key" class="bt-input-text mr5" placeholder="设置关键字/词 [ 百度 ]" type="text" value="'+  obj.key +'" style="width:300px;"></div>' +
+						'</div>' +
+						'<div class="line url_block">' +
+						'<span class="tname">检查URL</span>' +
+						'<div class="info-r"><input name="site_check_url" class="bt-input-text mr5" placeholder="设置检查的URL [ https://www.baidu.com ]" type="text" value="' + obj.site_check_url + '" style="width:300px;"></div>' +
+						'</div>' +
+						'<div class="line url_block">' +
+						'<span class="tname">关键字/词</span>' +
+						'<div class="info-r"><input name="site_check_word" class="bt-input-text mr5" placeholder="设置关键字/词 [ 百度 ]" type="text" value="' + obj.site_check_word + '" style="width:300px;"></div>' +
+						'</div>' +
+						'<div class="line mysql_block">' +
+						'<div class="info-r"><input style="display:none" name="mysql" value="' + obj.mysql + '"></div>' +
+						'</div></div>' +
+						'<div class="line" style="display:none">' +
+						'<span class="tname">监控推送状态</span>' +
+						'<div class="info-r"><input name="open" class="bt-input-text mr5"  type="text" value="' + obj.open + '" style="width:300px;"></div>' +
+						'</div>' +
+						'<div class="bt-form-submit-btn"><button type="button" class="btn btn-sm btn-danger  btn-close">关闭</button><button type="button" class="btn btn-sm btn-success btn-submit">' + (push_type == 0 ? '提交' : '保存') + '</button></div>' +
+						'</div>',
+					success: function (layero, index) {
+                        _this.get_net_card(function(res){
+                            var _html = '';
+                            for(var i=0;i<res.length;i++){
+                                _html += '<option value="'+ res[i] +'" '+ (res[i] == obj.netcard?'selected="selected"':'') +'>'+ res[i] +'</option>'
+                            }
+                            console.log(_html);
+                            $('.net_card').html(_html)
+                        });
+						if (push_type == 0) {
+							var site_one = $('[name="site_type"]').val();
+							$('[name="domain_type"]').html(_this.get_site_domain(site_list[site_one],'', false));
+						}else{
+							$('[name="domain_type"]').html(_this.get_site_domain(site_list[obj.site_name],obj.url_list, false));
+						}
+						$('[name="site_type"]').change(function () {
+							var val = $(this).val();
+							$('[name="domain_type"]').html(_this.get_site_domain(site_list[val],'', false));
+						})
+						$('.' + obj.check_type + '_block').show();
+						$('.btn-close').click(function () {
+							layer.close(index);
+						});
+						$('[name="check_type"]').change(function () {
+							$('.translate_block .line').hide();
+							$('[name="site_check_word"],[name="site_check_url"]').val('');
+							$('.' + $(this).val() + '_block').show();
+						})
+						$('[name="site_adv"]').change(function(){
+							var checked = $(this).prop('checked');
+							if(checked){
+								$('.site_adv_block').show().find('input').val('');
+							}else{
+								$('.site_adv_block').hide();
+							}
+						})
+						$('.btn-submit').click(function () {
+							var check_type = $('[name="check_type"]').val();
+							if ($('[name="push_name"]').val() == '') {
+								layer.msg('监控推送名称不能为空', { icon: 2 });
+								return false;
+							}
+							obj = {
+								check_type: check_type,
+								cpu_alarm_value: check_type == 'cpu' ? $('[name="cpu_alarm_value"]').val() : '',
+								cpu_check_time: check_type == 'cpu' ? $('[name="cpu_check_time"]').val() : '',
+								disk_alarm_value: check_type == 'disk' ? $('[name="disk_alarm_value"]').val() : '',
+								mem_alarm_value: check_type == 'mem' ? $('[name="mem_alarm_value"]').val() : '',
+								mem_check_time: check_type == 'mem' ? $('[name="mem_check_time"]').val() : '',
+								mysql:check_type == 'mysql' ? $('[name="mysql"]').val():'',
+								net_alarm_value: check_type == 'net' ? $('[name="net_alarm_value"]').val() : '',
+								net_bandwidth: check_type == 'net' ? $('[name="net_bandwidth"]').val() : '',
+								net_check_time: check_type == 'net' ? $('[name="net_check_time"]').val() : '',
+                                netcard:check_type == 'net' ? $('[name="netcard"]').val() : '',
+								site_name :check_type == 'site' ? $('[name="site_type"]').val() : '',
+								url_list:check_type == 'site' ? $('[name="domain_type"]').val() : '',
+								adv:check_type == 'site' ? ($('[name="site_adv"]').prop('checked')?1:0) : '',
+								key:check_type == 'site' ? $('[name="site_key"]').val() : '',
+								open: 1,
+								push_name: $('[name="push_name"]').val(),
+								push_type: $('[name="push_type"]').val(),
+                                push_time: $('[name="push_time"]').val(),
+								site_check_url: check_type == 'url' ? $('[name="site_check_url"]').val() : '',
+								site_check_word: check_type == 'url' ? $('[name="site_check_word"]').val() : ''
+							}
+							push_type == 0 ? _this.push_request('add', obj, index) : _this.push_request('edit', obj, index)
+						});
+					}
+				});
+			});
+		},
+        // 获取网卡
+        get_net_card:function(callback){
+			$.post('/plugin?action=a&name=msg_push&s=GetNetCard', function (res) {
+				if (callback) callback(res)
+			});
+        },
+		// 获取站点域名
+		get_site_domain:function(list,index,type) {
+			var _option = '';
+			if (type) {
+				list == undefined?list = {}:list
+				for (var i in list) {
+					_option += '<option value="' + i + '" ' + ( i == index ? 'selected="selected"' : '') + '>' + i + '</option>';
+				}
+			} else {
+				list == undefined?list = []:list
+				for (var i = 0; i < list.length; i++) {
+					_option += '<option value="' + list[i] + '" ' + ( list[i] == index ? 'selected="selected"' : '') + '>' + list[i] + '</option>';
+				}
+			}
+			return _option;
+		},
+		//获取服务状态
+		get_check_server: function (callback) {
+			$.post('/plugin?action=a&name=msg_push&s=CheckServer', function (res) {
+				if (callback) callback(res)
+			});
+		},
+		// 获取站点域名列表
+		get_local_site_list: function (callback) {
+			$.post('/plugin?action=a&name=msg_push&s=get_local_site_list', function (res) {
+				if (callback) callback(res)
+			});
+		},
+		// 推送信息请求
+		push_request: function (type, obj, callback, index) {
+			var _this = this, group = {};
+			if (typeof callback != 'function') index = callback;
+			switch (type) {
+				case 'add':
+					group = { tips: '正在添加监控推送内容，请稍后...', type: 'create_msg_even' }
+					break;
+				case 'edit':
+					group = { tips: '正在保存监控推送内容，请稍后...', type: 'modify_msgpush' }
+					break;
+				case 'open':
+					group = { tips: obj.open ? '正在开启该监控推送，请稍后...' : '正在关闭该监控推送，请稍后...', type: 'modify_msgpush' }
+					break;
+				case 'del':
+					group = { tips: '正在删除监控推送[ ' + obj.push_name + ' ]，请稍后...', type: 'remove_msgpush' }
+					break;
+				case 'start':
+					group = { tips: '正在启动监控推送，请稍后...', type: 'StartServer' }
+					break;
+				case 'stop':
+					group = { tips: '正在停止监控推送，请稍后...', type: 'StopServer' }
+					break;
+			}
+			var load = layer.msg(group.tips, { icon: 16, time: 0, shade: [0.3, '#000'] });
+			$.post('/plugin?action=a&name=msg_push&s=' + group.type, obj, function (res) {
+				layer.close(load);
+				layer.msg(res.msg, { icon: res.status ? 1 : 0 });
+				if (typeof callback == 'function') callback(res);
+				if (res.status) layer.close(index);
+				_this.get_event_list();
+			});
+		},
+		// 过滤器推送类型
+		filter_push_type: function (type) {
+			var filter_type = '';
+			switch (type) {
+				case 'mail':
+					filter_type = '邮箱';
+					break;
+			}
+			return filter_type;
+		},
+		// 获取邮箱列表
+		get_mail_list: function () {
+			var _this = this;
+			var load = layer.load();
+			$.get('/plugin?action=a&name=msg_push&s=get_email_list', function (res) {
+				layer.close(load);
+				var content = '';
+				for (var i = res.emails.length - 1; i >= 0; i--) {
+					content += '<tr>' +
+						'<td>' + res.emails[i] + '</td>' +
+						'<td style="text-align: right;"><a href="javascript:;"  class="btlink  del_mail" data-mail=' + res.emails[i] + '>删除</a></td>' +
+						'</tr>'
+				}
+				if (res.emails.length == 0) {
+					conter = '<tr ><td colspan="4">当前没有数据</td></tr>'
+				}
+				$('.mail_body tbody').html(content);
+				setTimeout(function () {
+					$('.del_mail').click(function () {
+						var mail = $(this).attr('data-mail');
+						var confirm = layer.confirm('是否删除该邮箱<a href="javascript:;" class="btlink">&nbsp;[' + mail + ']</a>&nbsp; ', { title: '警告', btn: ['确定', '取消'], icon: 0 }, function () {
+							_this.mail_request('del', { email: mail }, confirm);
+						});
+					});
+				}, 500);
+			});
+		},
+		// 邮箱事件视图
+		mail_event_view: function (mail) {
+			var mail_type = 0, _this = this;
+			if (mail == undefined) {
+				mail_type = 0;
+				mail = '';
+			} else {
+				mail_type = 1;
+			}
+			var mail_view = layer.open({
+				type: 1,
+				closeBtn: 2,
+				title: mail_type == 0 ? '添加邮箱' : '编辑邮箱 [&nbsp;' + mail + '&nbsp;]',
+				area: '380px',
+				shadeClose: false,
+                btn: ['提交', '取消'],
+				content: '<div class="bt-form bt-form pd20">' +
+					'<div class="line">' +
+                        '<span class="tname">邮箱地址</span>' +
+                        '<div class="info-r"><input name="mail" class="bt-input-text mr5" placeholder="请输入邮箱地址" type="text" value="' + mail + '" style="width:200px;"></div>' +
+					'</div>' +
+                    '<div class="line"><div style="margin-left: 34px;height: 25px;line-height: 25px;color: red;">*&nbsp;必须将msg@bt.cn白名单才能收到信息</div></div>'+
+					'</div>',
+                yes:function(index,layero){
+                    var mail = $('[name=mail]').val();
+                    if(mail == ''){
+                        layer.msg('邮箱地址不能为空！');
+                        return false;
+                    }
+                    _this.mail_request('add', { email: mail }, mail_view);
+                }
+			});
+		},
+		// 邮箱请求
+		mail_request: function (type, obj, callback, index) {
+			var _this = this, group = {};
+			if (typeof callback != 'function') index = callback;
+			switch (type) {
+				case 'add':
+					group = { tips: '正在添加邮箱号码，请稍后...', type: 'add_email' }
+					break;
+				case 'del':
+					group = { tips: '正在删除邮箱号码[ ' + obj.push_name + ' ]，请稍后...', type: 'remove_email' }
+					break;
+			}
+			var load = layer.msg(group.tips, { icon: 16, time: 0, shade: [0.3, '#000'] });
+			$.post('/plugin?action=a&name=msg_push&s=' + group.type, obj, function (res) {
+				layer.close(load);
+				layer.msg(res.msg, { icon: res.status ? 1 : 0 });
+				if (typeof callback == 'function') callback(res);
+				if (res.status) layer.close(index);
+				_this.get_mail_list();
+			});
+		},
+		// 获取推送日志列表,参数:分页page
+		get_push_log: function (page) {
+			var _this = this;
+			if (page == undefined) page = 1;
+			var load = layer.msg('正在获取日志信息，请稍后...', { icon: 16, time: 0, shade: [0.3, '#000'] });
+			$.get('/plugin?action=a&name=msg_push&s=get_logs&tojs=MSG_log&p=' + page, function (rdata) {
+				layer.close(load);
+				var content = '', rdatas = rdata.data, rdataPage = rdata.page, reg = /onclick='MSG_log\((\d+)\)'/g;
+				for (var i = 0; i < rdatas.length; i++) {
+					content += '<tr><td><div class="ov" title=\'' + rdatas[i].log + '\'>' + rdatas[i].log + '</div></td><td>' + rdatas[i].addtime + '</td></tr>';
+				}
+				$('.logs_body tbody').html(content);
+				$('.logs_body .page').html(rdataPage.replace(reg, 'data-page=\'$1\''));
+				setTimeout(function () {
+					$('.logs_body .page a').click(function (e) {
+						var page = $(this).attr('data-page');
+						_this.get_push_log(page);
+						return false;
+					});
+				}, 500);
+			});
+		},
+	}
+	// 对象深拷贝
+	function objDeepCopy(source) {
+		var sourceCopy = source instanceof Array ? [] : {};
+		for (var item in source) {
+			sourceCopy[item] = typeof source[item] === 'object' ? objDeepCopy(source[item]) : source[item];
+		}
+		return sourceCopy;
+	}
+	msg_push.bind();
+</script>

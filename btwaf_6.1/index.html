@@ -888,11 +888,13 @@
             layer.close(loadT);
             var tbody = ''
             for (var i = 0; i < rdata.length; i++) {
-                tbody += '<tr>\
+				if(rdata[i][0]){
+                     tbody += '<tr>\
                         <td>'+ rdata[i][0].join('.') + '</td>\
                         <td>'+ rdata[i][1].join('.') + '</td>\
                         <td class="text-right"><a class="btlink" onclick="remove_cn_ip('+ i + ')">删除</a></td>\
                     </tr>'
+				}
             }
             $("#cn_iplist_con").html(tbody)
         });
