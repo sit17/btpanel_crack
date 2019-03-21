@@ -4,7 +4,7 @@
 	"name":"app",
 	"type":"系统工具",
 	"ps":"微信小程序(测试版,生产环境请勿安装)",
-	"versions":"1.7",
+	"versions":"1.8",
 	"shell":"app.sh",
 	"checks":"/www/server/panel/plugin/app",
 	"author":"宝塔",

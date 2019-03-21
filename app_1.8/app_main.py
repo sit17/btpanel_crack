@@ -278,6 +278,7 @@ class app_main(SelfModule, ScanLogin):
         if 'mod_action' in get: get.action = get.mod_action;
         if 'mod_s' in get: get.s = get.mod_s;
         if 'mod_fun' in get: get.fun = get.mod_fun;
+        if get.model == 'panelPlugin':  get.model = 'plugin'+ str(sys.version_info[0])
         app_module = __import__(get.model)
         result = eval('app_module.' + get.model + '().' + get.action+'(get)')
         return result
