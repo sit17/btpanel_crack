@@ -4,7 +4,7 @@
   "name": "tamper_proof",
   "type": "付费插件",
   "ps": "事件型防篡改程序,可有效保护网站重要文件不被木马篡改",
-  "versions": "2.1",
+  "versions": "2.3",
   "shell": "tamper_proof.sh",
   "checks": "/www/server/panel/plugin/tamper_proof",
   "author": "宝塔",
