@@ -405,12 +405,8 @@ def task(pdata = None):
 def plugin(pdata = None):
     comReturn = comm.local()
     if comReturn: return comReturn
-    if sys.version_info[0] == 2:
-        import panelPlugin
-        pluginObject = panelPlugin.panelPlugin()
-    else:
-        import panelPlugin
-        pluginObject = panelPlugin.panelPlugin()
+    import panelPlugin
+    pluginObject = panelPlugin.panelPlugin()
     defs = ('update_zip','input_zip','export_zip','add_index','remove_index','sort_index','install_plugin','uninstall_plugin','get_soft_find','get_index_list','get_soft_list','get_cloud_list','check_deps','flush_cache','GetCloudWarning','install','unInstall','getPluginList','getPluginInfo','getPluginStatus','setPluginStatus','a','getCloudPlugin','getConfigHtml','savePluginSort')
     return publicObject(pluginObject,defs,None,pdata);
 
@@ -428,13 +424,8 @@ def panel_public():
         data = public.getJson(eval('pluwx.'+get.fun+'(get)'))
         return data,json_header
     
-    if sys.version_info[0] == 2:
-        import panelPlugin
-        plu = panelPlugin.panelPlugin();
-    else:
-        import panelPlugin
-        plu = panelPlugin.panelPlugin();
-
+    import panelPlugin
+    plu = panelPlugin.panelPlugin()
     get.s = '_check';
         
     checks = plu.a(get)
@@ -540,12 +531,8 @@ def check_token(data):
 @app.route('/yield',methods=method_all)
 def panel_yield():
     get = get_input()
-    if sys.version_info[0] == 2:
-        import panelPlugin
-        plu = panelPlugin.panelPlugin();
-    else:
-        import panelPlugin
-        plu = panelPlugin.panelPlugin();
+    import panelPlugin
+    plu = panelPlugin.panelPlugin()
     get.s = '_check';
     get.client_ip = public.GetClientIp()
     checks = plu.a(get)
@@ -574,13 +561,9 @@ def panel_pluginApi():
     info = json.loads(public.readFile(infoFile));
     if not info['api']:  return public.returnJson(False,'INIT_PLU_ACC_ERR');
 
-    if sys.version_info[0] == 2:
-        import panelPlugin
-        pluginObject = panelPlugin.panelPlugin();
-    else:
-        import panelPlugin
-        pluginObject = panelPlugin.panelPlugin();
-
+    import panelPlugin
+    pluginObject = panelPlugin.panelPlugin()
+    
     defs = ('install','unInstall','getPluginList','getPluginInfo','getPluginStatus','setPluginStatus','a','getCloudPlugin','getConfigHtml','savePluginSort')
     return publicObject(pluginObject,defs);
 
@@ -699,18 +682,22 @@ def create_rsa():
     
 @socketio.on('connect_event')
 def connected_msg(msg):
-    pdata = get_input_data(msg)
     if not check_login(): 
-        emit(pdata.s_response,{'data':public.getMsg('INIT_WEBSSH_LOGOUT')})
+        emit('server_response',{'data':public.getMsg('INIT_WEBSSH_LOGOUT')})
         return None 
+    global shell
+    if not shell: connect_ssh()
     try:
+        #shell.send(msg)
         recv = shell.recv(8192)
         emit('server_response',{'data':recv.decode("utf-8")})
-    except:pass
+    except:
+        pass
+
 
 @socketio.on('panel')
 def websocket_test(data):
-    pdata = get_input_data(data)
+    pdata = data
     if not check_login():
         emit(pdata.s_response,{'data':public.returnMsg(-1,public.getMsg('INIT_WEBSSH_LOGOUT'))})
         return None 
@@ -756,17 +743,12 @@ def check_login():
 
 def get_pd():
     tmp = -1
-    tmp1 = cache.get('plugin_soft_list')
-    if sys.version_info[0] == 2:
+    tmp1 = cache.get(public.to_string([112, 108, 117, 103, 105, 110, 95, 115, 111, 102, 116, 95, 108, 105, 115, 116]))
+    if not tmp1:
         import panelPlugin
         tmp1 = panelPlugin.panelPlugin().get_cloud_list()
-    else:
-        import panelPlugin
-        tmp1 = panelPlugin.panelPlugin().get_cloud_list()
-    for soft in tmp1['list']:
-        soft['endtime'] = 0
     if tmp1:
-        tmp = 0
+        tmp = tmp1[public.to_string([112,114,111])]
     else:
         tmp4 = cache.get(public.to_string([112, 95, 116, 111, 107, 101, 110]))
         if tmp4:
@@ -774,6 +756,8 @@ def get_pd():
             if not os.path.exists(tmp_f): public.writeFile(tmp_f,'-1')
             tmp = public.readFile(tmp_f)
             if tmp: tmp = int(tmp)
+  
+    tmp = 0
     if tmp == -1:
         tmp3 = public.to_string([20813,36153,29256])
     elif tmp == -2:
@@ -798,6 +782,7 @@ def get_pd():
                                      47, 115, 112, 97, 110, 62]).format(tmp2)
     else:
         tmp3 = public.to_string([20813,36153,29256])
+        
     return tmp3
 
 
