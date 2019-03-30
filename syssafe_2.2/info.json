@@ -5,7 +5,7 @@
   "name": "syssafe",
   "type": "扩展",
   "ps": "提供灵活的系统加固功能，防止系统被植入木马",
-  "versions": "2.1",
+  "versions": "2.2",
   "shell": "syssafe.sh",
   "checks": "/www/server/panel/plugin/syssafe",
   "author": "宝塔",

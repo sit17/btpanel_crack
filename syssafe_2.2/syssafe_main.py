@@ -332,7 +332,7 @@ class syssafe_main :#line:7
     def __OO00OO00O0O00OO0O (O000O0O0OOOO00O00 ):#line:321
         return json .loads (public .readFile (O000O0O0OOOO00O00 .__OOO0O00O0O0O0OOOO +'config.json'))#line:322
     __O00O0000OOO0OOOO0 =30 ;#line:323
-    __O0OO0O0OOOO0OOO0O =1048576 *100 ;#line:324
+    __O0OO0O0OOOO0OOO0O =1048576 *1000 ;#line:324
     __O0000OO0O00O0OO00 =None #line:325
     __OO0OO00000OO0O000 =None #line:326
     __O00O0OO0O0OOOOO00 =None #line:327

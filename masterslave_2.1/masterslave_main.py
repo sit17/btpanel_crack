@@ -19,22 +19,29 @@ import panelMysql as pm
 class masterslave_main:
     __mfile = "/etc/my.cnf"
     setpath = "/www/server/panel"
-    logfile = "/www/server/panel/plugin/masterslave/setslave.log"
-    totalspeedfile = "/www/server/panel/plugin/masterslave/speed.log"
+    logfile = "%s/plugin/masterslave/setslave.log" % setpath
+    totalspeedfile = "%s/plugin/masterslave/speed.log" % setpath
+    datafile = "%s/plugin/masterslave/data.json" % setpath
     def GetMasterInfo(self,get):
-        master_version = pm.panelMysql().query("select version()")[0][0].split("-")[0]
+        master_version = self.GetVersion()
         master_id = re.search("server-id\s+=\s+(\d+)", public.readFile("/etc/my.cnf")).group(1)
         masterinfo = {
             "slave_user": self.GetRandomString(9),
             "slave_pass": self.GetRandomString(9),
             "btmysql": self.GetRandomString(9),
-            "master_port": self.GetMysqlPort(),
+            "master_port": str(self.GetMysqlPort()),
             "master_version": str(master_version),
             "master_dbs": self.GetDbs(get),
-            "master_id": master_id
+            "master_id": master_id,
+            "slave_id": [(int(master_id)+1)]
         }
         print(masterinfo)
         return masterinfo
+
+    def GetVersion(self):
+        master_version = pm.panelMysql().query("select version()")[0][0].split(".")
+        master_version = master_version[0] + "." + master_version[1]
+        return master_version
 
     def GetMysqlPort(self):
         try:
@@ -50,7 +57,7 @@ class masterslave_main:
         # 判断mysql是否启动
         if not self.GetMysqlPort():
             print('请确定数据库已经开启')
-            return public.returnMsg(False, '请确定数据库是否已经开启')
+            return public.returnMsg(False, '请确定数据库是否已经开启，或root密码错误')
         master_version = pm.panelMysql().query("select version()")[0][0].split("-")[0]
         if "5.1." in master_version:
             return public.returnMsg(False, '本插件不支持5.1版本MYSQL，请安装5.5或以上版本')
@@ -81,13 +88,37 @@ class masterslave_main:
         except:
             return False
 
+    def CreateSalveUser(self,masterinfo,slave_ip):
+        if re.match("8",masterinfo["master_version"]):
+            create_btmysql_sql = "create user btmysql@'%s' identified by '%s'" % (slave_ip, masterinfo["btmysql"])
+            grant_btmysql_sql = "grant all on *.* to btmysql@'%s'" % slave_ip
+            create_slave_sql = "create user %s@'%s' identified by '%s'" % (masterinfo["slave_user"], slave_ip, masterinfo["slave_pass"])
+            grant_slave_sql = "grant replication slave on *.* to %s@'%s'" % (masterinfo["slave_user"], slave_ip)
+        else:
+            grant_btmysql_sql = ""
+            grant_slave_sql = ""
+            create_btmysql_sql = "grant all on *.* to btmysql@'%s' identified by '%s'" % (slave_ip,masterinfo["btmysql"])
+            create_slave_sql = "grant replication slave on *.* to %s@'%s' identified by '%s'" % (masterinfo["slave_user"],slave_ip, masterinfo["slave_pass"])
+        flush_sql = "flush privileges"
+        pm.panelMysql().execute("delete from mysql.user where host='%s'" % slave_ip)
+        for i in [create_btmysql_sql,create_slave_sql,grant_btmysql_sql,grant_slave_sql,flush_sql]:
+            pm.panelMysql().execute(i)
+
+    def CheckBinLog(self):
+        mconf = public.readFile(self.__mfile)
+        sidrep = "\nlog-bin=mysql-bin"
+        if not re.search(sidrep,mconf):
+            return False
+        else:
+            return True
+
     def SetMaster(self,get):
         if not self.GetPort(get):
             print(self.GetPort(get))
             return public.returnMsg(False, '请确定数据库是否已经开启')
         iprep = "(2(5[0-5]{1}|[0-4]\d{1})|[0-1]?\d{1,2})\.(2(5[0-5]{1}|[0-4]\d{1})|[0-1]?\d{1,2})\.(2(5[0-5]{1}|[0-4]\d{1})|[0-1]?\d{1,2})\.(2(5[0-5]{1}|[0-4]\d{1})|[0-1]?\d{1,2})"
-        if re.search(iprep, get.slaveip):
-            slave_ip = re.search(iprep, get.slaveip).group()
+        if re.search(iprep, get.slave_ip):
+            slave_ip = re.search(iprep, get.slave_ip).group()
         else:
             print('请输入正确的IP地址')
             return public.returnMsg(False, '请输入正确的IP地址')
@@ -101,7 +132,8 @@ class masterslave_main:
                 return public.returnMsg(False, '请输入正确的端口号')
         except:
             return public.returnMsg(False, '请输入正确的端口号')
-
+        if not self.CheckBinLog():
+            return public.returnMsg(False, '请先开启Mysql二进制日志')
         if not self.CheckPort(slave_ip,slave_port):
             return public.returnMsg(False, '无法访问从服务器<br>请确认安全组是否已经放行<br>Mysql端口：%s' % slave_port)
         mconf = public.readFile(self.__mfile)
@@ -117,9 +149,10 @@ class masterslave_main:
             for i in masterinfo["replicate_dbs"]:
                 d = public.M('databases').where('name=?', (i,)).find()
                 dbmsg.append(d)
+
+        masterinfo["slave_ip"] = [slave_ip]
+        masterinfo["slave_port"] = [str(slave_port)]
         masterinfo["replicate_dbs_info"] = dbmsg
-        masterinfo["slave_ip"] = slave_ip
-        masterinfo["slave_port"] = slave_port
         addconf = """
 log-slave-updates=true
 enforce-gtid-consistency=true
@@ -139,7 +172,7 @@ gtid-mode=on
                 pid_new = pid_old
                 public.writeFile("/tmp/mysqlpid", "")
                 for i in range(10):
-                    if i == 1:
+                    if i == 0:
                         os.system("/etc/init.d/mysqld restart &")
                         time.sleep(10)
                         pid_new = public.ExecShell("ps aux|grep 'mysql.sock'|awk 'NR==1 {print $2}'")[0].split("\n")[0]
@@ -150,28 +183,20 @@ gtid-mode=on
                     else:
                         public.writeFile("/tmp/mysqlpid", "ok")
                         break
-        if re.match("8",masterinfo["master_version"]):
-            create_btmysql_sql = "create user btmysql@'%s' identified by '%s'" % (
-            masterinfo["slave_ip"], masterinfo["btmysql"])
-            grant_btmysql_sql = "grant all on *.* to btmysql@'%s'" % (masterinfo["slave_ip"])
-            create_slave_sql = "create user %s@'%s' identified by '%s'" % (
-            masterinfo["slave_user"], masterinfo["slave_ip"], masterinfo["slave_pass"])
-            grant_slave_sql = "grant replication slave on *.* to %s@'%s'" % (
-            masterinfo["slave_user"], masterinfo["slave_ip"])
-        else:
-            grant_btmysql_sql = ""
-            grant_slave_sql = ""
-            create_btmysql_sql = "grant all on *.* to btmysql@'%s' identified by '%s'" % (masterinfo["slave_ip"],masterinfo["btmysql"])
-            create_slave_sql = "grant replication slave on *.* to %s@'%s' identified by '%s'" % (masterinfo["slave_user"],masterinfo["slave_ip"], masterinfo["slave_pass"])
-        flush_sql = "flush privileges"
-        pm.panelMysql().execute("delete from mysql.user where host='%s'" % slave_ip)
-        for i in [create_btmysql_sql,create_slave_sql,grant_btmysql_sql,grant_slave_sql,flush_sql]:
-            pm.panelMysql().execute(i)
+        time.sleep(1)
+        self.CreateSalveUser(masterinfo,slave_ip)
 
         keys = base64.b64encode(json.dumps(masterinfo))
-        print(keys)
-        public.writeFile("%s/plugin/masterslave/data.json" % self.setpath, json.dumps(masterinfo))
+        public.writeFile(self.datafile, json.dumps(masterinfo))
         return keys
+
+    def GetKeys(self,get):
+        masterinfo = public.readFile(self.datafile)
+        if not masterinfo:
+            return False
+        if "master_ip" in json.loads(masterinfo).keys():
+            return public.returnMsg(False, "该服务器为从服务器，无法获取key")
+        return base64.b64encode(masterinfo)
 
     def GetRandomString(self,length):
         from random import Random
@@ -218,6 +243,45 @@ gtid-mode=on
         s = public.readFile(self.totalspeedfile)
         return json.loads(s)
 
+    def CheckMasterOrSlave(self,get):
+        conf = public.readFile(self.datafile)
+        if os.path.exists(self.datafile) and conf:
+            if "master_ip" in json.loads(conf).keys():
+                return public.returnMsg(True, "该服务器为从服务器，无法添加从服务器")
+            else:
+                return public.returnMsg(True, "该服务器为主服务器")
+        else:
+            return public.returnMsg(False, "该服务器为还没配置主从")
+
+    def AddSalve(self,get):
+        if not self.GetPort(get):
+            print(self.GetPort(get))
+            return public.returnMsg(False, '请确定数据库是否已经开启')
+        conf = public.readFile(self.datafile)
+        slave_ip=get.slave_ip
+        if os.path.exists(self.datafile) and conf:
+            try:
+                master_conf = json.loads(conf)
+                if "slave_id" not in master_conf.keys():
+                    master_conf["slave_id"] = [2]
+                slave_id_new = int(master_conf["slave_id"][-1])+1
+                master_conf["slave_id"].append(slave_id_new)
+                if slave_ip in master_conf["slave_ip"]:
+                    return public.returnMsg(False, '该从库已经存在')
+                master_conf["slave_ip"].append(slave_ip)
+                master_conf["slave_port"].append(get.slave_port)
+                master_conf["slave_pass"] = master_conf["slave_pass"]
+                master_conf["slave_user"] = master_conf["slave_user"]
+                master_conf["btmysql"] = master_conf["btmysql"]
+
+                self.CreateSalveUser(master_conf,slave_ip)
+                public.writeFile(self.datafile,json.dumps(master_conf))
+                keys = base64.b64encode(json.dumps(master_conf))
+                return keys
+            except Exception as e:
+                return public.returnMsg(False, e)
+        else:
+            return public.returnMsg(False, "没有配置主从服务，无法添加从服务器")
 ####从库操作
     # 取进度
     def GetSpeed(self,get):
@@ -303,7 +367,7 @@ gtid-mode=on
     def BackUpMasterDbs(self,get):
         import MySQLdb
         bakpath = "/www/backup/database"
-        # 判断输入url是否为ip
+        # 是否为ip
         iprep = "(2(5[0-5]{1}|[0-4]\d{1})|[0-1]?\d{1,2})\.(2(5[0-5]{1}|[0-4]\d{1})|[0-1]?\d{1,2})\.(2(5[0-5]{1}|[0-4]\d{1})|[0-1]?\d{1,2})\.(2(5[0-5]{1}|[0-4]\d{1})|[0-1]?\d{1,2})"
         if re.search(iprep, get.master_ip):
             master_ip = re.search(iprep, get.master_ip).group()
@@ -317,30 +381,28 @@ gtid-mode=on
         # 解码
         masterinfo = json.loads(base64.b64decode(get.keys))
         masterinfo["master_ip"] = master_ip
-        slave_version = pm.panelMysql().query("select version()")[0][0].split("-")[0]
+        # slave_version = pm.panelMysql().query("select version()")[0][0].split("-")[0]
+        slave_version = self.GetVersion()
         masterinfo["slave_version"] = slave_version
         # 写入data.json供设置速度使用
         self.WriteLog(json.dumps(masterinfo))
-        public.writeFile("%s/plugin/masterslave/data.json" % self.setpath, json.dumps(masterinfo))
+        public.writeFile(self.datafile, json.dumps(masterinfo))
         if not self.CheckPort(master_ip, masterinfo["master_port"]):
-            return public.returnMsg(False, '无法访问从服务器<br>请确认安全组是否已经放行<br>Mysql端口：%s' % masterinfo["slave_port"])
-        if slave_version == masterinfo["master_version"]:
-            #开始锁表
+            return public.returnMsg(False, '无法访问从服务器<br>请确认安全组是否已经放行<br>Mysql端口：%s' % masterinfo["master_port"])
+        if slave_version in masterinfo["master_version"]:
             try:
-                db = MySQLdb.connect(host=masterinfo["master_ip"],port=masterinfo["master_port"], user="btmysql", passwd=masterinfo["btmysql"],
+                master_port = int(masterinfo["master_port"])
+            except Exception as e:
+                return public.returnMsg(False, e)
+            try:
+                db = MySQLdb.connect(host=masterinfo["master_ip"],port=master_port, user="btmysql", passwd=masterinfo["btmysql"],
                                      charset="utf8")
                 cur = db.cursor()
             except:
                 return public.returnMsg(False, '无法连接主服务器，请确定主服务器 IP端口是否正确，安全组是否已经放行Mysql端口')
-            print("主库开始锁表")
-            self.WriteLog("主库开始锁表")
-            cur.execute("flush tables with read lock;")
-
-            # baktime = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
-            print("Set Master to readonly mode")
             # 开始备份
             backsqlpath = "%s/masterslave.sql" % (bakpath)
-            backsh = "nohup mysqldump -h%s -P%s -u%s -p%s %s%s 1> %s 2>/dev/null&"
+            backsh = "nohup mysqldump -h%s -P%s -u%s -p%s --master-data=2 --skip-lock-tables --single-transaction %s%s 1> %s 2>/dev/null&"
             if masterinfo["replicate_dbs"][0] == "alldatabases":
                 print("Starting backup of databases alldatabases")
                 self.WriteLog("开始备份数据库")
@@ -355,7 +417,7 @@ gtid-mode=on
                 try:
                     self.WriteLog("备份数据库 %s" % "alldatabases")
                     error = public.ExecShell(backsh % (masterinfo["master_ip"], masterinfo["master_port"], "btmysql", masterinfo["btmysql"],"--all-databases","",backsqlpath))[1]
-                    if "error" in error:
+                    if "error" in error or "not exist" in error:
                         return public.returnMsg(False, '数据库备份失败 %s\n错误信息：%s\n ,请检测主库是否有问题' % ("alldatabases", error))
                 except:
                     self.WriteLog("备份失败 %s" % "alldatabases")
@@ -381,24 +443,25 @@ gtid-mode=on
                     error = public.ExecShell(backsh % (
                         masterinfo["master_ip"], masterinfo["master_port"], "btmysql", masterinfo["btmysql"], "--databases",
                         replicate_dbs, backsqlpath))[1]
-                    if "error" in error:
+                    if "error" in error or "not exist" in error:
                         return public.returnMsg(False, '数据库备份失败 %s\n错误信息：%s\n ,请检测主库是否有问题' % ("replicate_dbs", error))
                 except:
                     self.WriteLog("备份失败 %s" % replicate_dbs)
                     return public.returnMsg(False, '数据库备份失败 %s' % replicate_dbs)
                 threading.Thread(target=self.SetSpeed()).start()
                 self.WriteLog("备份成功")
-
-            masterloginfo = self.__ExceSql("show master status",masterinfo=masterinfo)[0].split("\n")[1].split("\t")
-            logfile = masterloginfo[0]
-            logpos = masterloginfo[1]
+            masterlogdata = public.ExecShell("head -n 50 %s" % backsqlpath)
+            try:
+                masterlogdata = masterlogdata[0]
+                rep = "CHANGE MASTER TO MASTER_LOG_FILE='([\w\-\.]+)',\s*MASTER_LOG_POS=(\d+);"
+                logfile = re.search(rep, masterlogdata).group(1)
+                logpos = re.search(rep, masterlogdata).group(2)
+            except:
+                return public.returnMsg(False, '获取Master信息失败')
             try:
                 gtid = self.__ExceSql('SELECT BINLOG_GTID_POS("%s", %s)' % (logfile,logpos),masterinfo=masterinfo)[0].split("\n")[1]
             except:
                 gtid = ""
-            print("主库解锁表")
-            self.WriteLog("主库解锁表")
-            cur.execute("unlock tables;")
             db.close()
             public.writeFile("%s/log.txt" % bakpath,str([logfile,logpos]))
             masterinfo["logfile"] = logfile
@@ -409,13 +472,13 @@ gtid-mode=on
             public.writeFile("/tmp/mysql.log", masterinfo, "a+")
             return masterinfo
         else:
-            self.WriteLog("mysql版本不一致")
-            return public.returnMsg(False, 'mysql版本不一致')
-
-
+            self.WriteLog("mysql版本不一致 主版本%s 从版本%s" % (masterinfo["master_version"],slave_version))
+            return public.returnMsg(False, 'mysql版本不一致 主版本%s 从版本%s' % (masterinfo["master_version"],slave_version))
     def SetSlave(self,get):
         if not self.GetPort(get):
             return public.returnMsg(False, '请确定数据库是否已经开启')
+        if not self.CheckBinLog():
+            return public.returnMsg(False, '请先开启Mysql二进制日志')
         sconf = public.readFile(self.__mfile)
         # 备份需要同步的数据库
         masterinfo = self.BackUpMasterDbs(get)
@@ -435,7 +498,6 @@ gtid-mode=on
                 masterinfo["master_ip"], masterinfo["master_port"], masterinfo["slave_user"],
                 masterinfo["slave_pass"],
                 masterinfo["logfile"], masterinfo["logpos"])
-
         # Mysql5.6+版本
         addconf = """
 log-slave-updates=true
@@ -447,20 +509,35 @@ gtid-mode=on"""
             create_replicate_sql += "CHANGE MASTER TO MASTER_HOST='%s',MASTER_PORT=%s,MASTER_USER='%s',MASTER_PASSWORD='%s',MASTER_AUTO_POSITION = 1" % (
                 masterinfo["master_ip"], masterinfo["master_port"], masterinfo["slave_user"],
                 masterinfo["slave_pass"])
-
         # 构造要同步的数据库配置
         replicate_dbs = ""
         if masterinfo["replicate_dbs"][0] != "alldatabases":
             for d in masterinfo["replicate_dbs"]:
                 replicate_dbs += "\nreplicate-wild-do-table = %s.%s" % (d, "%")
         else:
-            sconf = re.sub("replicate-wild-do-table\s+=\s+[\w\%\.\_\-]+","",sconf)
+            sconf = re.sub("replicate-wild-do-table\s*=\s*[\w\%\.\_\-]+","",sconf)
         print(replicate_dbs)
-        serverid = int(masterinfo["master_id"])+1
-        if not re.search("replicate-wild-do-table",sconf):
-            sconf = re.sub("server-id\s+=\s+\d+", "server-id = %s%s" % (serverid,replicate_dbs), sconf)
-        public.writeFile(self.__mfile, sconf)
+        try:
+            serverid = masterinfo["slave_id"]
+        except:
+            serverid = [int(masterinfo["master_id"]) +1]
+        localip = public.ExecShell("ip a")[0]
+        netip = public.readFile("%s/data/iplist.txt")
+        index = 0
+        try:
+            for i in masterinfo["slave_ip"]:
+                if i in localip or i in netip:
+                    index += masterinfo["slave_ip"].index("i")
+                    break
+            if not index:
+                return public.returnMsg(False, '主库没有设置该主机为从服务器，请先设置主服务器后再配置从库')
+        except:
+            pass
+        serverid = serverid[index]
 
+        if not re.search("replicate-wild-do-table",sconf):
+            sconf = re.sub("server-id\s*=\s*\d+", "server-id = %s%s" % (serverid,replicate_dbs), sconf)
+        public.writeFile(self.__mfile, sconf)
         # 导入主库数据库
         try:
             pid_old = public.ExecShell("ps aux|grep 'mysql.sock'|awk 'NR==1 {print $2}'")[0].split("\n")[0]
@@ -487,9 +564,6 @@ gtid-mode=on"""
             public.writeSpeed("导入数据库", 1, speed["total"])
             error = public.ExecShell("nohup /usr/bin/mysql -uroot -p%s < %s &" % (__dbpass, masterinfo["backsqlpath"]))
             self.WriteLog(str(error))
-            # for i in error:
-            #     if "error" in str.lower(str(i)):
-            #         return public.ReturnMsg(False, "导入失败")
         except Exception as e:
             self.WriteLog("导入数据库失败  %s" % e)
             return public.ReturnMsg(False, "导入失败")
@@ -504,7 +578,7 @@ gtid-mode=on"""
         self.WriteLog("旧PID %s" % pid_old)
         pid_new = ""
         public.writeFile("/tmp/mysqlpid", "")
-
+        restart = 0
         for i in range(10):
             if i == 1:
                 os.system("/etc/init.d/mysqld restart &")
@@ -516,14 +590,21 @@ gtid-mode=on"""
                 pid_new = public.ExecShell("ps aux|grep 'mysql.sock'|awk 'NR==1 {print $2}'")[0].split("\n")[0]
             else:
                 public.writeFile("/tmp/mysqlpid","ok")
+                restart +=1
                 break
+        if restart == 0:
+            return public.ReturnMsg(False, "导入数据后重启失败")
         public.writeSpeed("重启数据库", int(1), int(2))
         threading.Thread(target=self.SetSpeed()).start()
         self.WriteLog("mysql重启完成")
 
         # 写入同步的数据库到面板数据库
         for i in masterinfo["replicate_dbs_info"]:
-            public.M('databases').add(("name,username,password,accept,ps"), (i[2], i[3], i[4], i[5], i[6]))
+            if not i:
+                continue
+            localdb = public.M('databases').where('name=?', (i[2],)).select()
+            if not localdb:
+                public.M('databases').add(("name,username,password,accept,ps"), (i[2], i[3], i[4], i[5], i[6]))
         # 完整复制将主root密码写入到从的面板
         if masterinfo["replicate_dbs"][0] ==  "alldatabases":
             self.WriteLog("因为是完整同步，修改从库面板密码为主库")
@@ -558,9 +639,12 @@ gtid-mode=on"""
         pm.panelMysql().execute(grant_status_user)
 
         n = 0
-        for i in slavestatus:
-            if i == "Yes":
-                n += 1
+        try:
+            for i in slavestatus:
+                if i == "Yes":
+                    n += 1
+        except:
+            return public.returnMsg(False, '获取主从状态失败')
         if n == 2:
             print("设置成功")
             self.WriteLog("删除btmysql用户")
@@ -575,13 +659,13 @@ gtid-mode=on"""
             self.WriteLog("设置失败")
             os.system("rm -f %s" % self.totalspeedfile)
             return public.returnMsg(True, '设置失败')
-
     def RemoveReplicate(self,get):
-        f = "%s/plugin/masterslave/data.json" % self.setpath
-        conf = public.readFile(f)
-        if os.path.exists(f) and conf != "":
+        slave_ip = get.slave_ip
+        conf = public.readFile(self.datafile)
+        if os.path.exists(self.datafile) and conf != "":
             conf = json.loads(conf)
             try:
+                # 判断是否在从服务器操作，有值表示是
                 master_ip = conf["master_ip"]
             except:
                 master_ip = ""
@@ -589,17 +673,33 @@ gtid-mode=on"""
                 pm.panelMysql().execute("stop slave")
                 pm.panelMysql().execute("reset slave all")
                 pm.panelMysql().execute("reset master")
-            os.system("rm -f %s/plugin/masterslave/data.json" % self.setpath)
+                os.system("rm -f %s" % self.datafile)
+            else:
+                index = conf["slave_ip"].index(slave_ip)
+                conf["slave_ip"].pop(index)
+                conf["slave_port"].pop(index)
+                conf["slave_id"].pop(index)
+                if not conf["slave_ip"]:
+                    os.system("rm -f %s" % self.datafile)
+                else:
+                    public.writeFile(self.datafile,json.dumps(conf))
             self.WriteLog("删除成功")
             return public.returnMsg(True, "删除成功")
-
     # 获取主从状态
     def GetReplicateStatus(self,get):
-        f = "%s/plugin/masterslave/data.json" % self.setpath
-        conf = public.readFile(f)
-        if os.path.exists(f) and conf != "":
+        conf = public.readFile(self.datafile)
+        status_list = []
+        if os.path.exists(self.datafile) and conf != "":
             conf = json.loads(conf)
+            # 兼容旧版本设置
+            if not isinstance(conf["slave_ip"],list):
+                conf["slave_ip"] = [conf["slave_ip"]]
+                conf["slave_port"] = [str(conf["slave_port"])]
+                conf["slave_id"] = [int(conf["master_id"])+1]
+                public.writeFile(self.datafile,json.dumps(conf))
             try:
+                slaveip =  conf["slave_ip"]
+                slaveport = conf["slave_port"]
                 if "master_ip" in conf.keys():
                     slavestatus = pm.panelMysql().query("show slave status")[0]
                     Slave_IO_Running = slavestatus[10]
@@ -607,32 +707,61 @@ gtid-mode=on"""
                     master_ip = conf["master_ip"]
                     slave_ip = "local"
                 else:
-                    if not self.CheckPort(conf["slave_ip"], conf["slave_port"]):
-                        return public.returnMsg(False, '无法访问从服务器<br>请确认安全组是否已经放行<br>Mysql端口：%s' % conf["slave_ip"])
-                    slavestatus = public.ExecShell(
-                        "mysql -h%s -P%s --connect_timeout=3 -u%s -p%s -e 'show slave status\G'" % (conf["slave_ip"],conf["slave_port"],"user"+conf["slave_user"],"pass"+conf["slave_pass"]))[0]
-                    if not slavestatus:
-                        return public.returnMsg(True, "获取成功")
-                    Slave_IO_Running = "Slave_IO_Running:\s+(\w+)"
-                    Slave_SQL_Running = "Slave_SQL_Running:\s+(\w+)"
-                    Slave_IO_Running = re.search(Slave_IO_Running, slavestatus).group(1)
-                    Slave_SQL_Running = re.search(Slave_SQL_Running, slavestatus).group(1)
-                    master_ip = "local"
-                    slave_ip = conf["slave_ip"]
-            except:
-                return public.returnMsg(True, "获取成功")
+                    for i in slaveip:
+                        master_ip = "local"
+                        slave_ip = i
+                        if not self.CheckPort(slave_ip, slaveport[slaveip.index(i)]):
+                            status = {
+                                "Slave_IO_Running": "no",
+                                "Slave_SQL_Running": "no",
+                                "master_ip": master_ip,
+                                "slave_ip": slave_ip,
+                                "slavestatus": slavestatus,
+                                "replicate_dbs": conf["replicate_dbs"],
+                                "slave_port": slaveport[slaveip.index(i)]
+                            }
+                            status_list.append(status)
+                            continue
+                            # return public.returnMsg(False, '无法访问从服务器<br>请确认安全组是否已经放行<br>Mysql端口：%s' % i+":"+slaveport[slaveip.index(i)])
+                        slavestatus = public.ExecShell(
+                            "mysql -h%s -P%s --connect_timeout=3 -u%s -p%s -e 'show slave status\G'" % (i,slaveport[slaveip.index(i)],"user"+conf["slave_user"],"pass"+conf["slave_pass"]))[0]
+                        Slave_IO_Running = "Slave_IO_Running:\s+(\w+)"
+                        Slave_SQL_Running = "Slave_SQL_Running:\s+(\w+)"
+                        if not slavestatus:
+                            Slave_IO_Running = "no"
+                            Slave_SQL_Running = "no"
+                        else:
+                            Slave_IO_Running = re.search(Slave_IO_Running, slavestatus).group(1)
+                            Slave_SQL_Running = re.search(Slave_SQL_Running, slavestatus).group(1)
+                        status = {
+                            "Slave_IO_Running": Slave_IO_Running,
+                            "Slave_SQL_Running": Slave_SQL_Running,
+                            "master_ip": master_ip,
+                            "slave_ip": slave_ip,
+                            "slavestatus": slavestatus,
+                            "replicate_dbs": conf["replicate_dbs"],
+                            "slave_port": slaveport[slaveip.index(i)]
+                        }
+                        status_list.append(status)
 
+            except:
+                slavestatus = ""
+                Slave_IO_Running = "no"
+                Slave_SQL_Running = "no"
+                master_ip = ""
+                slave_ip = ""
         else:
             return public.returnMsg(True, "获取成功")
-        status = {
-            "Slave_IO_Running": Slave_IO_Running,
-            "Slave_SQL_Running": Slave_SQL_Running,
-            "master_ip": master_ip,
-            "slave_ip": slave_ip,
-            "slavestatus": slavestatus,
-            "replicate_dbs": conf["replicate_dbs"]
-        }
-        return public.returnMsg(True, status)
+        if not status_list:
+            status_list = [{
+                "Slave_IO_Running": Slave_IO_Running,
+                "Slave_SQL_Running": Slave_SQL_Running,
+                "master_ip": master_ip,
+                "slave_ip": slave_ip,
+                "slavestatus": slavestatus,
+                "replicate_dbs": conf["replicate_dbs"]
+            }]
+        return public.returnMsg(True, status_list)
 
     def CheckTables(self):
         __dbpass = public.M('config').where('id=?', (1,)).getField('mysql_root')
@@ -661,37 +790,35 @@ gtid-mode=on"""
     def GetReplicateError(self,get):
         f = "%s/plugin/masterslave/data.json" % self.setpath
         conf = json.loads(public.readFile(f))
-        status = self.GetReplicateStatus(get)["msg"]
-        if status["master_ip"] == "local":
-            status = status
-            if status["Slave_IO_Running"] != "Yes" or status["Slave_SQL_Running"] != "Yes":
-                errortable = self.CheckTables()
-                if errortable:
-                    return errortable
-                if self.CheckPort(conf["slave_ip"], conf["slave_port"]):
-                    last_io_errno = re.search("Last_IO_Errno:\s+(\d+)", status["slavestatus"]).group(1)
-                    if last_io_errno == "1236":
-                        errormsg = re.search("Last_IO_Error:\s+(.+)", status["slavestatus"]).group(1)
-                        if "Could not find first log file name in binary log index file" in errormsg:
-                            print('<br><a style="color:red;">主服务器二进制文件丢失，请重做主从，以免丢失数据</a>')
-                            return public.returnMsg(False, "主服务器异常重启导致主库有数据回滚，若有数据丢失请到从库查找，若要重做主从请先备份好主库和从库以免丢失数据")
-                        if "Slave has more GTIDs than the master has" in errormsg:
-                            print("主服务器二进制文件丢失，请重做主从，以免丢失数据")
-                            return public.returnMsg(False, "主服务器异常重启导致主库有数据回滚，若有数据丢失请到从库查找，若要重做主从请先备份好主库和从库以免丢失数据")
-                        if "Error: connecting slave requested to start from GTID" in errormsg:
-                            return public.returnMsg(False, "主服务器异常重启导致主库有数据回滚，若有数据丢失请到从库查找，若要重做主从请先备份好主库和从库以免丢失数据")
-                        return public.returnMsg(True, "读取二进制日志时报错，主要出现在服务器有异常重启的情况，是否尝试修复")
-                    # 主键冲突处理
-                    last_sql_errno = re.search("Last_SQL_Errno:\s+(\d+)", status["slavestatus"]).group(1)
-                    if last_sql_errno == "1062":
-                        # return {"fix": 1, "content": "从库已经存在插入的数据，修复会先删除从库冲突的数据，在插入主库数据，是否尝试修复"}
-                        return public.returnMsg(True, "从库已经存在插入的数据，修复会先删除从库冲突的数据，在插入主库数据，是否尝试修复"+'<br><a style="color:red;">！！！如果需要修复请先备份好从库以免使数据丢失！！！</a>')
-
+        status_list = self.GetReplicateStatus(get)["msg"]
+        for status in status_list:
+            if status["master_ip"] == "local" and status["slave_ip"] == get.slave_ip:
+                if status["Slave_IO_Running"] != "Yes" or status["Slave_SQL_Running"] != "Yes":
+                    errortable = self.CheckTables()
+                    if errortable:
+                        return errortable
+                    if self.CheckPort(status["slave_ip"], status["slave_port"]):
+                        last_io_errno = re.search("Last_IO_Errno:\s+(\d+)", status["slavestatus"]).group(1)
+                        if last_io_errno == "1236":
+                            errormsg = re.search("Last_IO_Error:\s+(.+)", status["slavestatus"]).group(1)
+                            if "Could not find first log file name in binary log index file" in errormsg:
+                                print('<br><a style="color:red;">主服务器二进制文件丢失，请重做主从，以免丢失数据</a>')
+                                return public.returnMsg(False, "主服务器异常重启导致主库有数据回滚，若有数据丢失请到从库查找，若要重做主从请先备份好主库和从库以免丢失数据")
+                            if "Slave has more GTIDs than the master has" in errormsg:
+                                print("主服务器二进制文件丢失，请重做主从，以免丢失数据")
+                                return public.returnMsg(False, "主服务器异常重启导致主库有数据回滚，若有数据丢失请到从库查找，若要重做主从请先备份好主库和从库以免丢失数据")
+                            if "Error: connecting slave requested to start from GTID" in errormsg:
+                                return public.returnMsg(False, "主服务器异常重启导致主库有数据回滚，若有数据丢失请到从库查找，若要重做主从请先备份好主库和从库以免丢失数据")
+                            return public.returnMsg(True, "读取二进制日志时报错，主要出现在服务器有异常重启的情况，是否尝试修复")
+                        # 主键冲突处理
+                        last_sql_errno = re.search("Last_SQL_Errno:\s+(\d+)", status["slavestatus"]).group(1)
+                        if last_sql_errno == "1062":
+                            return public.returnMsg(True, "从库已经存在插入的数据，修复时会先删除从库冲突数据，再尝试插入主库的数据到从库，是否尝试修复"+'<br><a style="color:red;">！！！如果需要修复请先备份好从库以免使数据丢失！！！</a>')
+                    else:
+                        return public.returnMsg(False, "无法连接到从服务器")
                 else:
-                    return public.returnMsg(False, "无法连接到从服务器")
-            else:
-                print("同步正常无需修复")
-                return public.returnMsg(False, "同步正常无需修复")
+                    print("同步正常无需修复")
+                    return public.returnMsg(False, "同步正常无需修复")
         else:
             return public.returnMsg(False, "请到主服务器执行")
         # if get.fix == "1":
@@ -701,99 +828,81 @@ gtid-mode=on"""
         file = "%s/plugin/masterslave/data.json" % self.setpath
         conf = json.loads(public.readFile(file))
         status = self.GetReplicateStatus(get)
+        slave_ip = get.slave_ip
         if status:
-            status = status["msg"]
-            if status["Slave_IO_Running"] != "Yes" or status["Slave_SQL_Running"] != "Yes":
-                mversion = pm.panelMysql().query("select version()")[0][0].split("-")[0]
-                Last_IO_Errno = re.search("Last_IO_Errno:\s+(\d+)", status["slavestatus"]).group(1)
-                if Last_IO_Errno == "1236":
-                    if "5.5" in mversion:
-                        errormsg = re.search("Last_IO_Error:\s+(.+)",status["slavestatus"]).group(1)
-                        rep = "(mysql-bin\.\d+)\'\s\w{2}\s(\d+)"
-                        errormsg = re.search(rep, errormsg)
-                        errmysqlbin = errormsg.group(1)
-                        errlogpos = errormsg.group(2)
-                        os.system(
-                            "/www/server/mysql/bin/mysqlbinlog /www/server/data/%s|grep 'end_log_pos' > /www/server/data/btfix.log" % errmysqlbin)
-                        mpos = public.ExecShell("tail -n 1 /www/server/data/btfix.log|awk '{print $7}'")[0].split("\n")[0]
-                        print(mpos)
-                        if int(mpos) < int(errlogpos):
-                            change_sql='stop slave;change master to  MASTER_LOG_FILE="%s",MASTER_LOG_POS=%s;start slave' % (errmysqlbin,mpos)
-                            print(change_sql)
-                            print(self.__ExceSql(conf["slave_ip"], conf["slave_port"], "user" + conf["slave_user"],
-                                           "pass" + conf["slave_pass"], change_sql))
-                            status = self.GetReplicateStatus(get)
-                            status = status["msg"]
-                            if status["Slave_IO_Running"] == "Yes" and status["Slave_SQL_Running"] == "Yes":
-                                os.system("rm -f /www/server/data/btfix.log")
-                                print("修复成功")
-                                return public.returnMsg(True, "修复成功")
-                            else:
-                                print("修复失败")
-                                return public.returnMsg(True, "修复失败")
+            status_list = status["msg"]
+            for status in status_list:
+                if status["slave_ip"] == slave_ip:
+                    if status["Slave_IO_Running"] != "Yes" or status["Slave_SQL_Running"] != "Yes":
+                        mversion = pm.panelMysql().query("select version()")[0][0].split("-")[0]
+                        Last_IO_Errno = re.search("Last_IO_Errno:\s+(\d+)", status["slavestatus"]).group(1)
+                        if Last_IO_Errno == "1236":
+                            if "5.5" in mversion:
+                                errormsg = re.search("Last_IO_Error:\s+(.+)",status["slavestatus"]).group(1)
+                                rep = "(mysql-bin\.\d+)\'\s\w{2}\s(\d+)"
+                                errormsg = re.search(rep, errormsg)
+                                errmysqlbin = errormsg.group(1)
+                                errlogpos = errormsg.group(2)
+                                os.system(
+                                    "/www/server/mysql/bin/mysqlbinlog /www/server/data/%s|grep 'end_log_pos' > /www/server/data/btfix.log" % errmysqlbin)
+                                mpos = public.ExecShell("tail -n 1 /www/server/data/btfix.log|awk '{print $7}'")[0].split("\n")[0]
+                                print(mpos)
+                                if int(mpos) < int(errlogpos):
+                                    change_sql='stop slave;change master to  MASTER_LOG_FILE="%s",MASTER_LOG_POS=%s;start slave' % (errmysqlbin,mpos)
+                                    print(change_sql)
+                                    print(self.__ExceSql(status["slave_ip"], status["slave_port"], "user" + conf["slave_user"],
+                                                   "pass" + conf["slave_pass"], change_sql))
+                                    status = self.GetReplicateStatus(get)
+                                    status = status["msg"]
+                                    if status["Slave_IO_Running"] == "Yes" and status["Slave_SQL_Running"] == "Yes":
+                                        os.system("rm -f /www/server/data/btfix.log")
+                                        print("修复成功")
+                                        return public.returnMsg(True, "修复成功")
+                                    else:
+                                        print("修复失败")
+                                        return public.returnMsg(True, "修复失败")
 
-                # 主键冲突处理
-                last_sql_errno = re.search("Last_SQL_Errno:\s+(\d+)", status["slavestatus"]).group(1)
-                if last_sql_errno == "1062":
-                    while True:
-                        errormsg = re.search("Last_SQL_Error:\s+(.*)", status["slavestatus"]).group(1)
-                        primary = "entry\s'(\w+)'"
-                        defdb = "database:\s'(\w*)'"
-                        db_tb = "insert\s+into\s+([\w\_\-\.]+)\s+\("
-                        primary = re.search(primary, errormsg).group(1)
-                        try:
-                            defdb = re.search(defdb, errormsg).group(1)
-                        except:
-                            defdb = ""
-                        db_tb = re.search(db_tb, errormsg).group(1)
-                        print(primary, defdb, db_tb)
-                        if not defdb:
-                            sql = "desc %s" % db_tb
-                            result = pm.panelMysql().query(sql)
-                            for i in result:
-                                if "PRI" in i:
-                                    prikey = i[0]
-                            sql = 'delete from %s where %s=%s;stop slave;start slave;' % (db_tb, prikey, primary)
-                            print(sql)
-                            a = self.__ExceSql(conf["slave_ip"], conf["slave_port"], "user" + conf["slave_user"],
-                                           "pass" + conf["slave_pass"], sql)
-                            print(a)
-                            status = self.GetReplicateStatus(get)["msg"]
-                            print(status)
-                            last_sql_errno = re.search("Last_SQL_Errno:\s+(\d+)", status["slavestatus"]).group(1)
-                            if last_sql_errno != "1062":
-                                return public.returnMsg(True, "修复成功")
-                else:
-                    return public.returnMsg(False, "无法修复")
+                        # 主键冲突处理
+                        last_sql_errno = re.search("Last_SQL_Errno:\s+(\d+)", status["slavestatus"]).group(1)
+                        if last_sql_errno == "1062":
+                            while True:
+                                errormsg = re.search("Last_SQL_Error:\s+(.*)", status["slavestatus"]).group(1)
+                                primary = "entry\s'(\w+)'"
+                                defdb = "database:\s'(\w*)'"
+                                db_tb = "(insert|INSERT)\s+(into|INTO)\s+(`|)([\w\_\-\.]+)(`|)"
+                                primary = re.search(primary, errormsg).group(1)
+                                try:
+                                    defdb = re.search(defdb, errormsg).group(1)
+                                except:
+                                    defdb = ""
+                                db_tb = re.search(db_tb, errormsg).group(4)
+                                print(primary, defdb, db_tb)
+                                if defdb:
+                                    db_tb=defdb+"."+db_tb.split(".")[-1]
+                                sql = "desc %s" % db_tb
+                                result = pm.panelMysql().query(sql)
+                                for i in result:
+                                    if "PRI" in i:
+                                        prikey = i[0]
+
+                                sql = 'delete from %s where %s=%s;stop slave;start slave;' % (db_tb, prikey, primary)
+                                print(sql)
+                                a = self.__ExceSql(status["slave_ip"], status["slave_port"], "user" + conf["slave_user"],
+                                               "pass" + conf["slave_pass"], sql)
+                                print(a)
+                                status_list = self.GetReplicateStatus(get)["msg"]
+                                for status in status_list:
+                                    if status["slave_ip"] == slave_ip:
+                                        last_sql_errno = re.search("Last_SQL_Errno:\s+(\d+)", status["slavestatus"]).group(1)
+                                        if last_sql_errno != "1062":
+                                            return public.returnMsg(True, "修复成功")
+                        else:
+                            return public.returnMsg(False, "无法修复")
 
 
-            else:
-                print("同步正常无需修复")
-                return public.returnMsg(True, "同步正常无需修复")
+                    else:
+                        print("同步正常无需修复")
+                        return public.returnMsg(True, "同步正常无需修复")
         else:
             return public.returnMsg(False, "获取主从状态失败")
 
-    # 同步异常提醒
-    def MonitorMysql(self,get):
-        if self.GetReplicateStatus(get):
-            pass
-        else:
-            pass
-
-#
-# class get:
-#     pass
-# get.slaveip = "192.168.1.199"
-# get.master_ip = "192.168.1.198"
-# get.slave_port = "3306"
-# get.replicate_dbs = ["jose"]
-# get.replicate_dbs = "[\"alldatabases\"]"
-# get.keys = "eyJtYXN0ZXJfZGJzIjogWyJhYWFfY29tIiwgImJiYl9jb20iLCAibWF5aWRheGlhbmciLCAibXlzcWwiXSwgInNsYXZlX3Bhc3MiOiAiWE5KYUJoQkRRIiwgInNsYXZlX3VzZXIiOiAiOXRnRjlEMHFZIiwgIm1hc3Rlcl92ZXJzaW9uIjogIjUuNS41NyIsICJzbGF2ZV9pcCI6ICIxOTIuMTY4LjEuMTk5IiwgIm1hc3Rlcl9wb3J0IjogIjMzMDYiLCAic2xhdmVfcG9ydCI6IDMzMDYsICJidG15c3FsIjogIldHNnhJeWk0eiIsICJyZXBsaWNhdGVfZGJzIjogWyJhbGxkYXRhYmFzZXMiXSwgInNsYXZlX2lwcyI6ICIxODA3MzRkNTA1MjNiYWYzIn0="
-# a = masterslave_main()
-# a.SetMaster(get)
-# a.GetMasterInfo(get)
-# # a.BackUpMasterDbs(get)
-# # a.SetSlave(get)
-# a.GetReplicateStatus(get)
-# a.FixReplicate(get)
-# a.GetReplicateError(get)
