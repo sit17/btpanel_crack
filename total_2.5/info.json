@@ -4,7 +4,7 @@
 	"name":"total",
 	"type":"付费插件",
 	"ps":"实时精确统计网站流量、ip、uv、pv、请求、蜘蛛等数据",
-	"versions":"2.5",
+	"versions":"2.6",
 	"shell":"total.sh",
 	"checks":"/www/server/panel/plugin/total",
 	"author":"宝塔",

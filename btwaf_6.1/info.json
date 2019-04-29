@@ -4,7 +4,7 @@
 	"name":"btwaf",
 	"type":"系统工具",
 	"ps":"有效防止sql注入/xss/一句话木马等常见渗透攻击(当前仅支持nginx)",
-	"versions":"6.3",
+	"versions":"6.6",
 	"shell":"btwaf.sh",
 	"checks":"/www/server/panel/plugin/btwaf",
 	"author":"宝塔",

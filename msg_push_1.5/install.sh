@@ -20,20 +20,18 @@ Install_MsgPush()
 	fi
     rm -f $pluginPath/msg_push_main.py
 	mkdir -p $pluginPath
-	/usr/bin/pip install requests
+	/usr/bin/pip install requests prettytable
 	echo '正在安装脚本文件...' > $install_tmp
 	wget -O $pluginPath/msg_push_main.py $download_Url/install/plugin/msg_push/msg_push_main.py -T 5
 	wget -O $pluginPath/index.html $download_Url/install/plugin/msg_push/index.html -T 5
 	wget -O $pluginPath/info.json $download_Url/install/plugin/msg_push/info.json -T 5
 	wget -O $pluginPath/icon.png $download_Url/install/plugin/msg_push/icon.png -T 5
-	wget -O $pluginPath/daemon.sh $download_Url/install/plugin/msg_push/daemon.sh -T 5
 	if [ ! -f "$pluginPath/config.json" ];then
 	    wget -O $pluginPath/config.json $download_Url/install/plugin/msg_push/config.json -T 5
 	fi
 	wget -O $pluginPath/install.sh $download_Url/install/plugin/msg_push/install.sh -T 5
 	\cp -a -r /www/server/panel/plugin/msg_push/icon.png /www/server/panel/static/img/soft_ico/ico-msg_push.png
-	echo "* * * * * /bin/sh /www/server/panel/plugin/msg_push/daemon.sh" >> /var/spool/cron/root
-	/usr/bin/systemctl restart crond
+	sed -i '/* * * * * \/bin\/sh \/www\/server\/panel\/plugin\/msg_push\/daemon.sh/d' /var/spool/cron/root
 	nohup /usr/bin/python /www/server/panel/plugin/msg_push/msg_push_main.py &
 	/usr/bin/echo '1' > /www/server/panel/plugin/msg_push/open.txt
 
@@ -45,7 +43,6 @@ Uninstall_MsgPush()
 	rm -rf $pluginPath
 	id=`ps aux|grep msg_push|grep -v "grep"|awk '{print $2}'`
 	kill -9 $id
-	sed -i '/* * * * * \/bin\/sh \/www\/server\/panel\/plugin\/msg_push\/daemon.sh/d' /var/spool/cron/root
 	/usr/bin/systemctl restart crond
 }
 
